@@ -1,19 +1,11 @@
-// Copyright 2014-2021 The winit contributors
-// Copyright 2021-2023 Tauri Programme within The Commons Conservancy
-// SPDX-License-Identifier: Apache-2.0
-
 use core::{cell::OnceCell, ptr::NonNull};
 
 use objc2::{
     declare_class, msg_send_id, mutability::MainThreadOnly, rc::Retained, runtime::ProtocolObject,
     ClassType, DeclaredClass,
 };
-use objc2_app_kit::{
-    NSWindow,
-};
-use objc2_foundation::{
-    ns_string, MainThreadMarker, NSObject, NSObjectProtocol, NSSize,
-};
+use objc2_app_kit::{NSWindow};
+use objc2_foundation::{ns_string, MainThreadMarker, NSObject, NSObjectProtocol, NSSize};
 use objc2_metal::{
     MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLCreateSystemDefaultDevice, MTLDevice,
     MTLLibrary, MTLPackedFloat3, MTLPrimitiveType, MTLRenderCommandEncoder,
@@ -47,6 +39,7 @@ struct AppState {
     command_queue: OnceCell<Retained<ProtocolObject<dyn MTLCommandQueue>>>,
     pipeline_state: OnceCell<Retained<ProtocolObject<dyn MTLRenderPipelineState>>>,
     window: OnceCell<Retained<NSWindow>>,
+    mtk_view: OnceCell<Retained<MTKView>>,
 }
 
 // declare the Objective-C class machinery
@@ -170,7 +163,7 @@ declare_class!(
         #[method(mtkView:drawableSizeWillChange:)]
         #[allow(non_snake_case)]
         unsafe fn mtkView_drawableSizeWillChange(&self, _view: &MTKView, _size: NSSize) {
-            // println!("mtkView_drawableSizeWillChange");
+            //println!("mtkView_drawableSizeWillChange");
         }
     }
 );
@@ -234,14 +227,20 @@ impl MtkViewDelegate {
         }
 
         // configure the window
-        window.setContentView(Some(&mtk_view));
+        let view = window.contentView().unwrap();
+        unsafe {
+            view.addSubview(&mtk_view);
+            mtk_view.setFrame(view.frame());
+        }
+
+        //window.setContentView(Some(&mtk_view));
         window.center();
         window.setTitle(ns_string!("Metal Example"));
-        window.makeKeyAndOrderFront(None);
 
         // initialize the delegate state
         self.ivars().command_queue.set(command_queue).expect("Failed to set command queue.");
         self.ivars().pipeline_state.set(pipeline_state).expect("Failed to set pipeline state.");
+        self.ivars().mtk_view.set(mtk_view).expect("Failed to set mtk_view.");
     }
 
     fn new(tao_window: &Window) -> Retained<Self> {
@@ -259,6 +258,7 @@ impl MtkViewDelegate {
             command_queue: OnceCell::default(),
             pipeline_state: OnceCell::default(),
             window: OnceCell::from(window),
+            mtk_view: OnceCell::new(),
         });
 
         unsafe { msg_send_id![super(this), init] }
@@ -286,10 +286,17 @@ fn main() {
         match event {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                WindowEvent::Resized(size) => {
+                    let mtk_view = mtk_view_delegate.ivars().mtk_view.get().unwrap();
+                    let ns_window = mtk_view_delegate.ivars().window.get().unwrap();
+                    unsafe {
+                        mtk_view.setFrame(ns_window.contentView().unwrap().frame());
+                    }
+                }
                 _ => (),
             },
             Event::RedrawRequested(_) => {
-                window.request_redraw();
+                //window.request_redraw();
             }
             _ => (),
         }
